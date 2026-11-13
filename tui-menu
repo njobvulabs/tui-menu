@@ -1,0 +1,634 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="tui-menu"
+VERSION="2.1.0"
+AUTHOR="Alfred Njobvu Jr"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tui-menu"
+CONFIG_FILE="${TUI_MENU_CONFIG:-$CONFIG_DIR/apps.tsv}"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tui-menu"
+HISTORY_FILE="$CACHE_DIR/history.tsv"
+SORT_STATE="$CACHE_DIR/sort-mode"
+MISSING_STATE="$CACHE_DIR/show-missing"
+LAST_STATUS="$CACHE_DIR/last-status"
+
+SELF=${BASH_SOURCE[0]}
+if [[ $SELF != */* ]]; then
+    SELF=$(command -v "$SELF" 2>/dev/null || printf '%s' "$SELF")
+fi
+SELF=$(readlink -f "$SELF" 2>/dev/null || printf '%s' "$SELF")
+SELF_Q=$(printf '%q' "$SELF")
+
+ORDER=()
+declare -A LABEL=() DESC=() CATEGORY=() TAGS=() PACKAGE=() HIDDEN=()
+
+add_app() {
+    local cmd=$1 label=$2 desc=$3 category=$4 tags=$5 package=$6
+    if [[ -z ${LABEL["$cmd"]+x} ]]; then
+        ORDER+=("$cmd")
+    fi
+    LABEL["$cmd"]=$label
+    DESC["$cmd"]=$desc
+    CATEGORY["$cmd"]=$category
+    TAGS["$cmd"]=$tags
+    PACKAGE["$cmd"]=$package
+}
+
+add_builtins() {
+    add_app yazi       "yazi"       "Modern file manager with image/PDF previews"      File    "file manager,preview"      yazi
+    add_app nnn        "nnn"        "Ultra-lightweight minimalist file manager"         File    "file manager,lightweight"  nnn
+    add_app mc         "Midnight Commander" "Dual-pane file manager with GPM mouse support" File "file manager,pane"          mc
+    add_app micro      "micro"      "Modern terminal text editor"                       Editor  "editor,text"               micro
+    add_app nano       "nano"       "Simple terminal text editor"                       Editor  "editor,text"               nano
+    add_app btop       "btop"       "Resource and process monitor"                      Monitor "system,process,cpu"         btop
+    add_app gdu        "gdu"        "Interactive disk usage analyzer"                   Monitor "disk,usage,storage"         gdu
+    add_app wiremix    "wiremix"    "PipeWire audio mixer"                              Audio   "audio,pipewire,mixer"      wiremix
+    add_app bluetui    "bluetui"    "Interactive Bluetooth manager"                     Network "bluetooth,device"           bluetui
+    add_app nmtui      "nmtui"      "NetworkManager Wi-Fi and connection TUI"           Network "network,wifi,connection"    nmtui
+    add_app cha        "Chawan"     "Modern terminal web browser"                       Web     "browser,web,pager"         chawan
+    add_app w3m        "w3m"        "Text-based web browser and pager"                  Web     "browser,web,pager"         w3m
+    add_app dooit      "dooit"      "Interactive todo list manager"                     Util    "todo,tasks,productivity"   dooit
+    add_app gophertube "GopherTube" "YouTube search and streaming TUI (mpv + chafa)"    Media   "youtube,streaming,media"   gophertube
+    add_app glow       "glow"       "Markdown document reader"                          Util    "markdown,reader,docs"      glow
+}
+
+tsv_field() {
+    local s=$1 n=$2
+    while (( n > 0 )); do
+        if [[ $s == *$'\t'* ]]; then
+            s=${s#*$'\t'}
+        else
+            s=""
+        fi
+        n=$((n - 1))
+    done
+    printf '%s' "${s%%$'\t'*}"
+}
+
+load_config() {
+    [[ -f $CONFIG_FILE ]] || return 0
+    local line cmd label desc category tags package
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%$'\r'}
+        [[ $line == \#* ]] && continue
+        [[ -z ${line//[[:space:]]/} ]] && continue
+        cmd=$(tsv_field "$line" 0)
+        [[ -n $cmd ]] || continue
+        if [[ $cmd == !* ]]; then
+            HIDDEN["${cmd#!}"]=1
+            continue
+        fi
+        label=$(tsv_field "$line" 1)
+        desc=$(tsv_field "$line" 2)
+        category=$(tsv_field "$line" 3)
+        tags=$(tsv_field "$line" 4)
+        package=$(tsv_field "$line" 5)
+        [[ -n $label ]] || label=$cmd
+        [[ -n $desc ]] || desc="No description"
+        [[ -n $category ]] || category="Other"
+        [[ -n $package ]] || package=${cmd%% *}
+        add_app "$cmd" "$label" "$desc" "$category" "$tags" "$package"
+    done < "$CONFIG_FILE"
+
+    local -a kept=()
+    local item
+    for item in "${ORDER[@]}"; do
+        if [[ -z ${HIDDEN["$item"]:-} ]]; then
+            kept+=("$item")
+        fi
+    done
+    ORDER=("${kept[@]}")
+}
+
+ensure_config() {
+    if [[ -n ${TUI_MENU_CONFIG:-} ]]; then
+        return 0
+    fi
+    [[ -f $CONFIG_FILE ]] && return 0
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_FILE" <<'EOF'
+# tui-menu app list (tab-separated)
+# cmd<TAB>label<TAB>description<TAB>category<TAB>tags<TAB>package
+#
+# Override a built-in by reusing its command name.
+# Hide a built-in by prefixing the command with ! (for example: !nano).
+# Example:
+# cha	Chawan	Modern terminal web browser	Web	browser,web	chawan
+EOF
+}
+
+is_installed() {
+    local cmd=${1%% *}
+    command -v "$cmd" >/dev/null 2>&1
+}
+
+state_read() {
+    local file=$1 default=$2 value=""
+    if [[ -f $file ]]; then
+        IFS= read -r value < "$file" || true
+    fi
+    if [[ -n $value ]]; then
+        printf '%s' "$value"
+    else
+        printf '%s' "$default"
+    fi
+}
+
+state_write() {
+    mkdir -p "$CACHE_DIR"
+    printf '%s\n' "$2" > "$1"
+}
+
+category_color() {
+    case ${1,,} in
+        file*)  printf '\033[34m' ;;
+        edit*)  printf '\033[32m' ;;
+        monit*) printf '\033[33m' ;;
+        net*)   printf '\033[36m' ;;
+        audio*) printf '\033[35m' ;;
+        web*)   printf '\033[94m' ;;
+        media*) printf '\033[95m' ;;
+        util*)  printf '\033[37m' ;;
+        *)      printf '\033[90m' ;;
+    esac
+}
+
+frequent_sequence() {
+    local -A count=()
+    local ts cmd index=0
+    if [[ -f $HISTORY_FILE ]]; then
+        while IFS=$'\t' read -r ts cmd; do
+            [[ -n ${cmd:-} ]] || continue
+            count["$cmd"]=$(( ${count["$cmd"]:-0} + 1 ))
+        done < "$HISTORY_FILE"
+    fi
+    for cmd in "${ORDER[@]}"; do
+        printf '%d\t%d\t%s\n' "${count["$cmd"]:-0}" "$index" "$cmd"
+        index=$((index + 1))
+    done | sort -t$'\t' -k1,1nr -k2,2n | cut -f3-
+}
+
+build_lines() {
+    local mode=$1 show_missing=$2 use_ansi=$3
+    local -a sequence=()
+    if [[ $mode == frequent ]]; then
+        mapfile -t sequence < <(frequent_sequence)
+    else
+        sequence=("${ORDER[@]}")
+    fi
+
+    local cmd installed label desc category tags package padded display color reset
+    local display_label hint command_hint
+    reset=$'\033[0m'
+
+    for cmd in "${sequence[@]}"; do
+        installed=0
+        if is_installed "$cmd"; then
+            installed=1
+        fi
+        if [[ $show_missing -eq 0 && $installed -eq 0 ]]; then
+            continue
+        fi
+
+        label=${LABEL["$cmd"]:-$cmd}
+        desc=${DESC["$cmd"]:-}
+        category=${CATEGORY["$cmd"]:-Other}
+        tags=${TAGS["$cmd"]:-}
+        package=${PACKAGE["$cmd"]:-${cmd%% *}}
+
+        display_label=$label
+        if [[ ${cmd,,} != ${label,,} ]]; then
+            display_label="$label ($cmd)"
+        fi
+        printf -v padded '%-22s' "$display_label"
+
+        if [[ $use_ansi -eq 1 ]]; then
+            color=$(category_color "$category")
+            if [[ $installed -eq 0 ]]; then
+                color=$'\033[2;90m'
+            fi
+            display="${color}${padded}${reset} ${desc}"
+            [[ -n $category ]] && display+="  ${color}${category}${reset}"
+            [[ $installed -eq 0 ]] && display+="  ${color}[missing]${reset}"
+        else
+            display="${padded} ${desc}"
+            [[ -n $category ]] && display+="  ${category}"
+            [[ $installed -eq 0 ]] && display+="  [missing]"
+        fi
+
+        printf '%s\t%s\t%s\t%s\n' "$cmd" "$display" "$package" "$installed"
+    done
+}
+
+header_text() {
+    local sort_mode show_missing sort_label missing_label tmux_hint="" last_status=""
+    sort_mode=$(state_read "$SORT_STATE" curated)
+    show_missing=$(state_read "$MISSING_STATE" 1)
+    last_status=$(state_read "$LAST_STATUS" "")
+
+    if [[ $sort_mode == frequent ]]; then
+        sort_label="most-used"
+    else
+        sort_label="curated"
+    fi
+    if [[ $show_missing == 1 ]]; then
+        missing_label="shown"
+    else
+        missing_label="hidden"
+    fi
+    if [[ -n ${TMUX:-} ]]; then
+        tmux_hint=" · C-o tmux window"
+    fi
+
+    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview · C-e edit%s\n' \
+        "$tmux_hint"
+    printf 'sort: %s · missing: %s' "$sort_label" "$missing_label"
+    if [[ -n $last_status ]]; then
+        printf ' · last: %s' "$last_status"
+    fi
+    printf '\n'
+}
+
+record_launch() {
+    local cmd=$1
+    mkdir -p "$CACHE_DIR"
+    if command -v flock >/dev/null 2>&1; then
+        {
+            flock 9
+            printf '%s\t%s\n' "$(date +%s)" "$cmd" >> "$HISTORY_FILE"
+        } 9>>"$HISTORY_FILE"
+    else
+        printf '%s\t%s\n' "$(date +%s)" "$cmd" >> "$HISTORY_FILE"
+    fi
+}
+
+cmd_internal_list() {
+    local mode=${1:-$(state_read "$SORT_STATE" curated)}
+    local show_missing
+    show_missing=$(state_read "$MISSING_STATE" 1)
+    case $mode in
+        all)       show_missing=1 ;;
+        installed) show_missing=0 ;;
+    esac
+
+    local -a lines=()
+    mapfile -t lines < <(build_lines "$mode" "$show_missing" 1)
+    if (( ${#lines[@]} == 0 )); then
+        printf 'No apps to show. Press F2 to include missing apps.\n'
+        return 0
+    fi
+    printf '%s\n' "${lines[@]}"
+}
+
+cmd_list() {
+    local mode=${1:-installed}
+    case $mode in
+        installed|all) ;;
+        *)
+            printf 'Usage: %s --list[=installed|all]\n' "$APP" >&2
+            return 2
+            ;;
+    esac
+
+    local cmd installed label desc package status
+    for cmd in "${ORDER[@]}"; do
+        installed=0
+        if is_installed "$cmd"; then
+            installed=1
+        fi
+        if [[ $mode == installed && $installed -eq 0 ]]; then
+            continue
+        fi
+        label=${LABEL["$cmd"]:-$cmd}
+        desc=${DESC["$cmd"]:-}
+        package=${PACKAGE["$cmd"]:-${cmd%% *}}
+        if [[ $installed -eq 1 ]]; then
+            status="installed"
+        else
+            status="missing"
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$cmd" "$label" "$desc" "$status"
+    done
+}
+
+cmd_check() {
+    local cmd installed package label status version missing=0
+    printf '%-14s %-20s %-16s %s\n' "COMMAND" "LABEL" "PACKAGE" "STATUS"
+    printf '%-14s %-20s %-16s %s\n' "-------" "-----" "-------" "------"
+    for cmd in "${ORDER[@]}"; do
+        label=${LABEL["$cmd"]:-$cmd}
+        package=${PACKAGE["$cmd"]:-${cmd%% *}}
+        if is_installed "$cmd"; then
+            version=""
+            if command -v pacman >/dev/null 2>&1; then
+                version=$(pacman -Q "$package" 2>/dev/null | cut -d' ' -f2- || true)
+            fi
+            if [[ -n $version ]]; then
+                status="installed ($version)"
+            else
+                status="installed"
+            fi
+        else
+            status="MISSING (yay -S $package)"
+            missing=1
+        fi
+        printf '%-14s %-20s %-16s %s\n' "${cmd%% *}" "$label" "$package" "$status"
+    done
+    return "$missing"
+}
+
+cmd_preview() {
+    local cmd="$*"
+    local label=${LABEL["$cmd"]:-$cmd}
+    local desc=${DESC["$cmd"]:-}
+    local category=${CATEGORY["$cmd"]:-Other}
+    local tags=${TAGS["$cmd"]:-}
+    local package=${PACKAGE["$cmd"]:-${cmd%% *}}
+    local exe=""
+    exe=$(command -v "${cmd%% *}" 2>/dev/null || true)
+
+    printf '\033[1m%s\033[0m\n' "$label"
+    printf '%s\n\n' "$desc"
+    printf 'Category : %s\n' "$category"
+    if [[ -n $tags ]]; then
+        printf 'Tags     : %s\n' "$tags"
+    fi
+
+    if [[ -n $exe ]]; then
+        local version=""
+        if command -v pacman >/dev/null 2>&1; then
+            version=$(pacman -Q "$package" 2>/dev/null || true)
+        fi
+        printf 'Command  : %s\n' "$exe"
+        if [[ -n $version ]]; then
+            printf 'Package  : %s\n' "$version"
+        else
+            printf 'Package  : %s\n' "$package"
+        fi
+        printf 'Status   : installed\n'
+        if [[ -n ${TMUX:-} ]]; then
+            printf '\nPress Enter to launch, or C-o for a new tmux window.\n'
+        else
+            printf '\nPress Enter to launch.\n'
+        fi
+    else
+        printf 'Package  : %s\n' "$package"
+        printf 'Status   : not installed\n'
+        printf 'Install  : yay -S %s\n' "$package"
+        printf '\nThis entry is dimmed. F2 hides/shows missing apps.\n'
+    fi
+}
+
+cmd_copy() {
+    local cmd="$*"
+    if command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$cmd" | wl-copy
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send -a "$APP" "Copied command" "$cmd" || true
+        fi
+    else
+        printf '%s\n' "$cmd" >&2
+    fi
+}
+
+cmd_new_window() {
+    if [[ -z ${TMUX:-} ]]; then
+        printf '%s: not running inside tmux\n' "$APP" >&2
+        return 1
+    fi
+    tmux new-window -c "$PWD" "$*"
+}
+
+cmd_launch() {
+    local cmd="$*"
+    local package=${PACKAGE["$cmd"]:-${cmd%% *}}
+    local -a argv=()
+
+    if ! is_installed "$cmd"; then
+        state_write "$LAST_STATUS" "$cmd — not installed (yay -S $package)"
+        return 0
+    fi
+
+    record_launch "$cmd"
+    read -r -a argv <<< "$cmd"
+
+    local rc=0
+    "${argv[@]}" || rc=$?
+
+    state_write "$LAST_STATUS" "$cmd — exit $rc"
+    return 0
+}
+
+cmd_edit() {
+    ensure_config
+    local -a editor
+    read -r -a editor <<< "${EDITOR:-nano}"
+    if ! command -v "${editor[0]}" >/dev/null 2>&1; then
+        editor=(nano)
+    fi
+    "${editor[@]}" "$CONFIG_FILE"
+}
+
+cmd_toggle_sort() {
+    local current next
+    current=$(state_read "$SORT_STATE" curated)
+    if [[ $current == frequent ]]; then
+        next=curated
+    else
+        next=frequent
+    fi
+    state_write "$SORT_STATE" "$next"
+}
+
+cmd_toggle_missing() {
+    local current next
+    current=$(state_read "$MISSING_STATE" 1)
+    if [[ $current == 1 ]]; then
+        next=0
+    else
+        next=1
+    fi
+    state_write "$MISSING_STATE" "$next"
+}
+
+fallback_menu() {
+    local loop=${1:-1}
+    local cmd choice
+    while true; do
+        local -a names=()
+        for cmd in "${ORDER[@]}"; do
+            if is_installed "$cmd"; then
+                names+=("$cmd")
+            fi
+        done
+        if (( ${#names[@]} == 0 )); then
+            printf '%s: no installed apps found\n' "$APP" >&2
+            return 1
+        fi
+
+        printf 'fzf not found; choose an app:\n' >&2
+        local i
+        for i in "${!names[@]}"; do
+            printf '  %d) %s\n' "$((i + 1))" "${LABEL["${names[$i]}"]:-${names[$i]}}" >&2
+        done
+        printf '  0) Quit\n' >&2
+        printf 'Selection: ' >&2
+        IFS= read -r choice < /dev/tty || return 1
+
+        [[ $choice == 0 ]] && return 0
+        if [[ $choice =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#names[@]} )); then
+            cmd=${names[$((choice - 1))]}
+            if [[ $loop -eq 1 ]]; then
+                cmd_launch "$cmd"
+                continue
+            fi
+            record_launch "$cmd"
+            local -a argv
+            read -r -a argv <<< "$cmd"
+            exec "${argv[@]}"
+        fi
+    done
+}
+
+interactive() {
+    local loop=${1:-1}
+    if [[ ! -t 0 ]]; then
+        printf '%s: interactive mode needs a TTY (use --list, --check, or --help)\n' "$APP" >&2
+        return 1
+    fi
+
+    ensure_config
+    mkdir -p "$CACHE_DIR"
+
+    if ! command -v fzf >/dev/null 2>&1; then
+        fallback_menu "$loop"
+        return
+    fi
+
+    local height="60%"
+    if [[ -n ${TMUX:-} ]]; then
+        height="100%"
+    fi
+
+    local sort_mode show_missing header
+    sort_mode=$(state_read "$SORT_STATE" curated)
+    show_missing=$(state_read "$MISSING_STATE" 1)
+    header=$(header_text)
+
+    local -a lines=()
+    mapfile -t lines < <(build_lines "$sort_mode" "$show_missing" 1)
+
+    local -a args=(
+        --ansi
+        --delimiter=$'\t'
+        --with-nth=2
+        --accept-nth=1
+        --prompt="Launch TUI > "
+        --height="$height"
+        --layout=reverse
+        --border=rounded
+        --border-label=" TUI Apps · by $AUTHOR "
+        --info=inline
+        --header="$header"
+        --preview="$SELF_Q --_preview {1}"
+        --preview-window="right,55%,wrap,border-left"
+        --bind="ctrl-/:toggle-preview"
+        --bind="ctrl-y:execute-silent($SELF_Q --_copy {1})"
+        --bind="ctrl-e:execute($SELF_Q --_edit)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
+        --bind="ctrl-r:execute-silent($SELF_Q --_toggle-sort)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
+        --bind="f2:execute-silent($SELF_Q --_toggle-missing)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
+    )
+    if [[ -n ${TMUX:-} ]]; then
+        args+=(--bind="ctrl-o:execute-silent($SELF_Q --_new-window {1})+abort")
+    fi
+    if [[ $loop -eq 1 ]]; then
+        args+=(
+            --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-header($SELF_Q --_header)"
+            --bind="ctrl-q:abort"
+        )
+    fi
+
+    local selected
+    selected=$(printf '%s\n' "${lines[@]}" | fzf "${args[@]}") || exit 0
+
+    if [[ $loop -eq 1 ]]; then
+        exit 0
+    fi
+
+    [[ -n $selected ]] || exit 0
+
+    local cmd=$selected
+    local package=${PACKAGE["$cmd"]:-${cmd%% *}}
+    if ! is_installed "$cmd"; then
+        printf '\n%s is not installed. Install it with: yay -S %s\n' "$cmd" "$package" >&2
+        IFS= read -r -n 1 -s -p 'Press any key to close...' _ < /dev/tty || true
+        printf '\n' >&2
+        exit 1
+    fi
+
+    record_launch "$cmd"
+    local -a argv
+    read -r -a argv <<< "$cmd"
+    exec "${argv[@]}"
+}
+
+usage() {
+    cat <<EOF
+$APP $VERSION — Developed by $AUTHOR
+
+Usage: $APP [OPTION]
+
+Interactive TUI application launcher.
+
+Options:
+  -h, --help          Show this help
+  -V, --version       Show version
+      --list[=MODE]   List apps (MODE: installed, all)
+      --check         Report installed and missing apps
+      --once          Close the menu after launching an app
+
+Keys:
+  Enter   launch the selected app; returns to the menu when it exits
+  Esc     quit the menu
+  C-q     quit the menu
+  C-o     launch in a new tmux window (inside tmux)
+  C-y     copy the command to the clipboard
+  C-r     toggle curated / most-used ordering
+  C-/     toggle the preview pane
+  F2      show / hide missing apps
+  C-e     edit the app list
+
+Config: $CONFIG_FILE
+EOF
+}
+
+add_builtins
+if [[ -f $CONFIG_FILE ]]; then
+    load_config
+fi
+
+case ${1:-} in
+    "" )               interactive ;;
+    --once)            interactive 0 ;;
+    -h|--help)         usage ;;
+    -V|--version)      printf '%s %s — Developed by %s\n' "$APP" "$VERSION" "$AUTHOR" ;;
+    --list)            shift; cmd_list "${1:-installed}" ;;
+    --list=*)          cmd_list "${1#*=}" ;;
+    --check)           cmd_check ;;
+    --_list)           cmd_internal_list ;;
+    --_list=*)         cmd_internal_list "${1#*=}" ;;
+    --_preview)        shift; cmd_preview "$@" ;;
+    --_copy)           shift; cmd_copy "$@" ;;
+    --_new-window)     shift; cmd_new_window "$@" ;;
+    --_launch)         shift; cmd_launch "$@" ;;
+    --_edit)           cmd_edit ;;
+    --_toggle-sort)    cmd_toggle_sort ;;
+    --_toggle-missing) cmd_toggle_missing ;;
+    --_header)         header_text ;;
+    *)
+        printf '%s: unknown option: %s\n' "$APP" "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
