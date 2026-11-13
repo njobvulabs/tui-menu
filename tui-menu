@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP="tui-menu"
-VERSION="2.1.0"
+VERSION="2.3.0"
 AUTHOR="Alfred Njobvu Jr"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tui-menu"
@@ -12,6 +12,7 @@ HISTORY_FILE="$CACHE_DIR/history.tsv"
 SORT_STATE="$CACHE_DIR/sort-mode"
 MISSING_STATE="$CACHE_DIR/show-missing"
 LAST_STATUS="$CACHE_DIR/last-status"
+NOTICE_FILE="$CACHE_DIR/notice"
 
 SELF=${BASH_SOURCE[0]}
 if [[ $SELF != */* ]]; then
@@ -21,10 +22,10 @@ SELF=$(readlink -f "$SELF" 2>/dev/null || printf '%s' "$SELF")
 SELF_Q=$(printf '%q' "$SELF")
 
 ORDER=()
-declare -A LABEL=() DESC=() CATEGORY=() TAGS=() PACKAGE=() HIDDEN=()
+declare -A LABEL=() DESC=() CATEGORY=() TAGS=() PACKAGE=() HIDDEN=() SOURCE=()
 
 add_app() {
-    local cmd=$1 label=$2 desc=$3 category=$4 tags=$5 package=$6
+    local cmd=$1 label=$2 desc=$3 category=$4 tags=$5 package=$6 source=${7:-built-in}
     if [[ -z ${LABEL["$cmd"]+x} ]]; then
         ORDER+=("$cmd")
     fi
@@ -33,6 +34,7 @@ add_app() {
     CATEGORY["$cmd"]=$category
     TAGS["$cmd"]=$tags
     PACKAGE["$cmd"]=$package
+    SOURCE["$cmd"]=$source
 }
 
 add_builtins() {
@@ -88,7 +90,7 @@ load_config() {
         [[ -n $desc ]] || desc="No description"
         [[ -n $category ]] || category="Other"
         [[ -n $package ]] || package=${cmd%% *}
-        add_app "$cmd" "$label" "$desc" "$category" "$tags" "$package"
+        add_app "$cmd" "$label" "$desc" "$category" "$tags" "$package" config
     done < "$CONFIG_FILE"
 
     local -a kept=()
@@ -140,6 +142,22 @@ state_write() {
     printf '%s\n' "$2" > "$1"
 }
 
+notice_write() {
+    mkdir -p "$CACHE_DIR"
+    printf '%s\t%s\n' "$(date +%s)" "$1" > "$NOTICE_FILE"
+}
+
+notice_text() {
+    local ts msg ttl=${TUI_MENU_NOTICE_TTL:-8}
+    [[ -f $NOTICE_FILE ]] || return 0
+    IFS=$'\t' read -r ts msg < "$NOTICE_FILE" || return 0
+    [[ $ts =~ ^[0-9]+$ ]] || return 0
+    [[ $ttl =~ ^[0-9]+$ ]] || ttl=8
+    if (( $(date +%s) - ts <= ttl )); then
+        printf '%s' "$msg"
+    fi
+}
+
 category_color() {
     case ${1,,} in
         file*)  printf '\033[34m' ;;
@@ -154,26 +172,58 @@ category_color() {
     esac
 }
 
-frequent_sequence() {
-    local -A count=()
+color_enabled() {
+    [[ ${TUI_MENU_COLOR:-auto} == never ]] && return 1
+    [[ -n ${NO_COLOR:-} ]] && return 1
+    return 0
+}
+
+history_sequence() {
+    local mode=${1:-frequent}
+    local -A count=() last=()
     local ts cmd index=0
     if [[ -f $HISTORY_FILE ]]; then
         while IFS=$'\t' read -r ts cmd; do
             [[ -n ${cmd:-} ]] || continue
-            count["$cmd"]=$(( ${count["$cmd"]:-0} + 1 ))
+            if [[ $mode == recent ]]; then
+                [[ $ts =~ ^[0-9]+$ ]] || continue
+                if (( ts > ${last["$cmd"]:-0} )); then
+                    last["$cmd"]=$ts
+                fi
+            else
+                count["$cmd"]=$(( ${count["$cmd"]:-0} + 1 ))
+            fi
         done < "$HISTORY_FILE"
     fi
     for cmd in "${ORDER[@]}"; do
-        printf '%d\t%d\t%s\n' "${count["$cmd"]:-0}" "$index" "$cmd"
+        if [[ $mode == recent ]]; then
+            printf '%d\t%d\t%s\n' "${last["$cmd"]:-0}" "$index" "$cmd"
+        else
+            printf '%d\t%d\t%s\n' "${count["$cmd"]:-0}" "$index" "$cmd"
+        fi
         index=$((index + 1))
     done | sort -t$'\t' -k1,1nr -k2,2n | cut -f3-
+}
+
+history_stats() {
+    local want=$1 ts cmd count=0 last=0
+    if [[ -f $HISTORY_FILE ]]; then
+        while IFS=$'\t' read -r ts cmd; do
+            [[ ${cmd:-} == "$want" ]] || continue
+            count=$((count + 1))
+            if [[ $ts =~ ^[0-9]+$ ]] && (( ts > last )); then
+                last=$ts
+            fi
+        done < "$HISTORY_FILE"
+    fi
+    printf '%d\t%d\n' "$count" "$last"
 }
 
 build_lines() {
     local mode=$1 show_missing=$2 use_ansi=$3
     local -a sequence=()
-    if [[ $mode == frequent ]]; then
-        mapfile -t sequence < <(frequent_sequence)
+    if [[ $mode == frequent || $mode == recent ]]; then
+        mapfile -t sequence < <(history_sequence "$mode")
     else
         sequence=("${ORDER[@]}")
     fi
@@ -210,10 +260,12 @@ build_lines() {
             fi
             display="${color}${padded}${reset} ${desc}"
             [[ -n $category ]] && display+="  ${color}${category}${reset}"
+            [[ -n $tags ]] && display+="  ${color}· ${tags}${reset}"
             [[ $installed -eq 0 ]] && display+="  ${color}[missing]${reset}"
         else
             display="${padded} ${desc}"
             [[ -n $category ]] && display+="  ${category}"
+            [[ -n $tags ]] && display+="  · ${tags}"
             [[ $installed -eq 0 ]] && display+="  [missing]"
         fi
 
@@ -222,13 +274,35 @@ build_lines() {
 }
 
 header_text() {
-    local sort_mode show_missing sort_label missing_label tmux_hint="" last_status=""
+    local tmux_hint=""
+    if [[ -n ${TMUX:-} ]]; then
+        tmux_hint=" · C-o tmux window"
+    fi
+
+    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview\n'
+    printf 'C-e edit · F1 help · F5 refresh%s\n' "$tmux_hint"
+}
+
+footer_text() {
+    local sort_mode show_missing sort_label missing_label last_status="" notice=""
+    local cmd installed=0 missing=0
     sort_mode=$(state_read "$SORT_STATE" curated)
     show_missing=$(state_read "$MISSING_STATE" 1)
     last_status=$(state_read "$LAST_STATUS" "")
+    notice=$(notice_text)
+
+    for cmd in "${ORDER[@]}"; do
+        if is_installed "$cmd"; then
+            installed=$((installed + 1))
+        else
+            missing=$((missing + 1))
+        fi
+    done
 
     if [[ $sort_mode == frequent ]]; then
         sort_label="most-used"
+    elif [[ $sort_mode == recent ]]; then
+        sort_label="recent"
     else
         sort_label="curated"
     fi
@@ -237,15 +311,14 @@ header_text() {
     else
         missing_label="hidden"
     fi
-    if [[ -n ${TMUX:-} ]]; then
-        tmux_hint=" · C-o tmux window"
-    fi
 
-    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview · C-e edit%s\n' \
-        "$tmux_hint"
-    printf 'sort: %s · missing: %s' "$sort_label" "$missing_label"
+    printf 'sort: %s · missing: %s · %d installed / %d missing' \
+        "$sort_label" "$missing_label" "$installed" "$missing"
     if [[ -n $last_status ]]; then
         printf ' · last: %s' "$last_status"
+    fi
+    if [[ -n $notice ]]; then
+        printf ' · %s' "$notice"
     fi
     printf '\n'
 }
@@ -273,7 +346,11 @@ cmd_internal_list() {
     esac
 
     local -a lines=()
-    mapfile -t lines < <(build_lines "$mode" "$show_missing" 1)
+    local use_ansi=0
+    if color_enabled; then
+        use_ansi=1
+    fi
+    mapfile -t lines < <(build_lines "$mode" "$show_missing" "$use_ansi")
     if (( ${#lines[@]} == 0 )); then
         printf 'No apps to show. Press F2 to include missing apps.\n'
         return 0
@@ -338,6 +415,72 @@ cmd_check() {
     return "$missing"
 }
 
+cmd_check_config() {
+    local file=$CONFIG_FILE
+    printf 'Config: %s\n' "$file"
+    if [[ ! -f $file ]]; then
+        printf 'Not found; using built-in entries only.\n'
+        return 0
+    fi
+
+    local -A seen=() hidden_seen=()
+    local -a hide_targets=()
+    local line cmd stripped tabs lineno=0 entries=0 warnings=0 target
+    while IFS= read -r line || [[ -n $line ]]; do
+        lineno=$((lineno + 1))
+        line=${line%$'\r'}
+        [[ $line == \#* ]] && continue
+        [[ -z ${line//[[:space:]]/} ]] && continue
+        stripped=${line//$'\t'/}
+        tabs=$(( ${#line} - ${#stripped} ))
+        if (( tabs > 5 )); then
+            printf 'line %d: warning: too many fields (%d columns; expected at most 6)\n' \
+                "$lineno" "$((tabs + 1))"
+            warnings=$((warnings + 1))
+        fi
+
+        cmd=$(tsv_field "$line" 0)
+        if [[ -z $cmd ]]; then
+            printf 'line %d: warning: empty command\n' "$lineno"
+            warnings=$((warnings + 1))
+            continue
+        fi
+
+        if [[ $cmd == !* ]]; then
+            target=${cmd#!}
+            if [[ -z $target ]]; then
+                printf 'line %d: warning: hide directive has no command\n' "$lineno"
+                warnings=$((warnings + 1))
+            elif [[ -n ${hidden_seen["$target"]:-} ]]; then
+                printf 'line %d: warning: duplicate hide directive for %s\n' "$lineno" "$target"
+                warnings=$((warnings + 1))
+            else
+                hidden_seen["$target"]=1
+                hide_targets+=("$target")
+            fi
+            continue
+        fi
+
+        if [[ -n ${seen["$cmd"]:-} ]]; then
+            printf 'line %d: warning: duplicate command: %s\n' "$lineno" "$cmd"
+            warnings=$((warnings + 1))
+        fi
+        seen["$cmd"]=1
+        entries=$((entries + 1))
+    done < "$file"
+
+    for target in "${hide_targets[@]}"; do
+        if [[ -z ${LABEL["$target"]+x} ]]; then
+            printf 'warning: hide directive !%s matches no built-in or config command\n' "$target"
+            warnings=$((warnings + 1))
+        fi
+    done
+
+    printf '%d entries, %d hide directives, %d warning(s)\n' \
+        "$entries" "${#hide_targets[@]}" "$warnings"
+    (( warnings == 0 ))
+}
+
 cmd_preview() {
     local cmd="$*"
     local label=${LABEL["$cmd"]:-$cmd}
@@ -345,15 +488,31 @@ cmd_preview() {
     local category=${CATEGORY["$cmd"]:-Other}
     local tags=${TAGS["$cmd"]:-}
     local package=${PACKAGE["$cmd"]:-${cmd%% *}}
+    local source=${SOURCE["$cmd"]:-built-in}
     local exe=""
+    local launches=0 last_used=0 last_label="never"
+    local stats
     exe=$(command -v "${cmd%% *}" 2>/dev/null || true)
+    stats=$(history_stats "$cmd")
+    IFS=$'\t' read -r launches last_used <<< "$stats"
+    if (( last_used > 0 )); then
+        last_label=$(date -d "@$last_used" '+%Y-%m-%d %H:%M' 2>/dev/null || printf '%s' "$last_used")
+    fi
 
-    printf '\033[1m%s\033[0m\n' "$label"
+    if color_enabled; then
+        printf '\033[1m%s\033[0m\n' "$label"
+    else
+        printf '%s\n' "$label"
+    fi
     printf '%s\n\n' "$desc"
     printf 'Category : %s\n' "$category"
     if [[ -n $tags ]]; then
         printf 'Tags     : %s\n' "$tags"
     fi
+    printf 'Source   : %s\n' "$source"
+    printf 'Entry    : %s\n' "$cmd"
+    printf 'Launches : %d\n' "$launches"
+    printf 'Last used: %s\n' "$last_label"
 
     if [[ -n $exe ]]; then
         local version=""
@@ -382,13 +541,23 @@ cmd_preview() {
 
 cmd_copy() {
     local cmd="$*"
-    if command -v wl-copy >/dev/null 2>&1; then
-        printf '%s' "$cmd" | wl-copy
-        if command -v notify-send >/dev/null 2>&1; then
-            notify-send -a "$APP" "Copied command" "$cmd" || true
-        fi
-    else
+    local copied=0
+    if command -v wl-copy >/dev/null 2>&1 && printf '%s' "$cmd" | wl-copy; then
+        copied=1
+    elif command -v xclip >/dev/null 2>&1 && printf '%s' "$cmd" | xclip -selection clipboard; then
+        copied=1
+    elif command -v xsel >/dev/null 2>&1 && printf '%s' "$cmd" | xsel --clipboard --input; then
+        copied=1
+    fi
+
+    if [[ $copied -eq 0 ]]; then
         printf '%s\n' "$cmd" >&2
+        notice_write "copy failed: no clipboard tool"
+        return 1
+    fi
+    notice_write "copied: $cmd"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "$APP" "Copied command" "$cmd" || true
     fi
 }
 
@@ -428,16 +597,17 @@ cmd_edit() {
         editor=(nano)
     fi
     "${editor[@]}" "$CONFIG_FILE"
+    notice_write "config edited"
 }
 
 cmd_toggle_sort() {
     local current next
     current=$(state_read "$SORT_STATE" curated)
-    if [[ $current == frequent ]]; then
-        next=curated
-    else
-        next=frequent
-    fi
+    case $current in
+        frequent) next=recent ;;
+        recent)   next=curated ;;
+        *)        next=frequent ;;
+    esac
     state_write "$SORT_STATE" "$next"
 }
 
@@ -454,7 +624,7 @@ cmd_toggle_missing() {
 
 fallback_menu() {
     local loop=${1:-1}
-    local cmd choice
+    local cmd choice label desc category display_label padded
     while true; do
         local -a names=()
         for cmd in "${ORDER[@]}"; do
@@ -467,27 +637,41 @@ fallback_menu() {
             return 1
         fi
 
-        printf 'fzf not found; choose an app:\n' >&2
+        printf '%s: fzf not found; choose an app:\n' "$APP" >&2
         local i
         for i in "${!names[@]}"; do
-            printf '  %d) %s\n' "$((i + 1))" "${LABEL["${names[$i]}"]:-${names[$i]}}" >&2
+            cmd=${names[$i]}
+            label=${LABEL["$cmd"]:-$cmd}
+            desc=${DESC["$cmd"]:-No description}
+            category=${CATEGORY["$cmd"]:-Other}
+            display_label=$label
+            if [[ ${cmd,,} != ${label,,} ]]; then
+                display_label="$label ($cmd)"
+            fi
+            printf -v padded '%-24s' "$display_label"
+            printf '  %2d) %s %s  [%s]\n' "$((i + 1))" "$padded" "$desc" "$category" >&2
         done
-        printf '  0) Quit\n' >&2
+        printf '   q) Quit\n' >&2
         printf 'Selection: ' >&2
         IFS= read -r choice < /dev/tty || return 1
 
-        [[ $choice == 0 ]] && return 0
-        if [[ $choice =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#names[@]} )); then
-            cmd=${names[$((choice - 1))]}
-            if [[ $loop -eq 1 ]]; then
-                cmd_launch "$cmd"
-                continue
-            fi
-            record_launch "$cmd"
-            local -a argv
-            read -r -a argv <<< "$cmd"
-            exec "${argv[@]}"
+        case $choice in
+            q|Q|0) return 0 ;;
+        esac
+        if ! [[ $choice =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#names[@]} )); then
+            printf 'Invalid selection: %s\n' "$choice" >&2
+            continue
         fi
+
+        cmd=${names[$((choice - 1))]}
+        if [[ $loop -eq 1 ]]; then
+            cmd_launch "$cmd"
+            continue
+        fi
+        record_launch "$cmd"
+        local -a argv
+        read -r -a argv <<< "$cmd"
+        exec "${argv[@]}"
     done
 }
 
@@ -511,16 +695,19 @@ interactive() {
         height="100%"
     fi
 
-    local sort_mode show_missing header
+    local sort_mode show_missing header footer use_ansi=0
     sort_mode=$(state_read "$SORT_STATE" curated)
     show_missing=$(state_read "$MISSING_STATE" 1)
     header=$(header_text)
+    footer=$(footer_text)
+    if color_enabled; then
+        use_ansi=1
+    fi
 
     local -a lines=()
-    mapfile -t lines < <(build_lines "$sort_mode" "$show_missing" 1)
+    mapfile -t lines < <(build_lines "$sort_mode" "$show_missing" "$use_ansi")
 
     local -a args=(
-        --ansi
         --delimiter=$'\t'
         --with-nth=2
         --accept-nth=1
@@ -531,21 +718,28 @@ interactive() {
         --border-label=" TUI Apps · by $AUTHOR "
         --info=inline
         --header="$header"
+        --footer="$footer"
+        --footer-border=line
         --preview="$SELF_Q --_preview {1}"
-        --preview-window="right,55%,wrap,border-left"
+        --preview-window="right,55%,wrap,border-left,<100(up,45%,wrap,border-left)"
         --bind="ctrl-/:toggle-preview"
-        --bind="ctrl-y:execute-silent($SELF_Q --_copy {1})"
-        --bind="ctrl-e:execute($SELF_Q --_edit)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
-        --bind="ctrl-r:execute-silent($SELF_Q --_toggle-sort)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
-        --bind="f2:execute-silent($SELF_Q --_toggle-missing)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)"
+        --bind="ctrl-y:execute-silent($SELF_Q --_copy {1})+transform-footer($SELF_Q --_footer)"
+        --bind="f1:execute($SELF_Q --_help)"
+        --bind="ctrl-e:execute($SELF_Q --_edit)+reload($SELF_Q --_list)+transform-header($SELF_Q --_header)+transform-footer($SELF_Q --_footer)"
+        --bind="ctrl-r:execute-silent($SELF_Q --_toggle-sort)+reload($SELF_Q --_list)+transform-footer($SELF_Q --_footer)"
+        --bind="f2:execute-silent($SELF_Q --_toggle-missing)+reload($SELF_Q --_list)+transform-footer($SELF_Q --_footer)"
+        --bind="f5:reload($SELF_Q --_list)+transform-footer($SELF_Q --_footer)"
+        --bind="ctrl-q:abort"
     )
+    if [[ $use_ansi -eq 1 ]]; then
+        args+=(--ansi)
+    fi
     if [[ -n ${TMUX:-} ]]; then
         args+=(--bind="ctrl-o:execute-silent($SELF_Q --_new-window {1})+abort")
     fi
     if [[ $loop -eq 1 ]]; then
         args+=(
-            --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-header($SELF_Q --_header)"
-            --bind="ctrl-q:abort"
+            --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-footer($SELF_Q --_footer)"
         )
     fi
 
@@ -586,6 +780,7 @@ Options:
   -V, --version       Show version
       --list[=MODE]   List apps (MODE: installed, all)
       --check         Report installed and missing apps
+      --check-config  Validate the app list file
       --once          Close the menu after launching an app
 
 Keys:
@@ -594,13 +789,23 @@ Keys:
   C-q     quit the menu
   C-o     launch in a new tmux window (inside tmux)
   C-y     copy the command to the clipboard
-  C-r     toggle curated / most-used ordering
+  C-r     cycle curated / most-used / recent ordering
   C-/     toggle the preview pane
+  F1      show this help
   F2      show / hide missing apps
+  F5      refresh the app list
   C-e     edit the app list
 
 Config: $CONFIG_FILE
 EOF
+}
+
+cmd_internal_help() {
+    usage
+    if [[ -t 0 || -t 1 || -t 2 ]]; then
+        IFS= read -r -n 1 -s -p 'Press any key to return...' _ < /dev/tty || true
+        printf '\n' >&2
+    fi
 }
 
 add_builtins
@@ -616,6 +821,7 @@ case ${1:-} in
     --list)            shift; cmd_list "${1:-installed}" ;;
     --list=*)          cmd_list "${1#*=}" ;;
     --check)           cmd_check ;;
+    --check-config)    cmd_check_config ;;
     --_list)           cmd_internal_list ;;
     --_list=*)         cmd_internal_list "${1#*=}" ;;
     --_preview)        shift; cmd_preview "$@" ;;
@@ -626,6 +832,8 @@ case ${1:-} in
     --_toggle-sort)    cmd_toggle_sort ;;
     --_toggle-missing) cmd_toggle_missing ;;
     --_header)         header_text ;;
+    --_footer)         footer_text ;;
+    --_help)           cmd_internal_help ;;
     *)
         printf '%s: unknown option: %s\n' "$APP" "$1" >&2
         usage >&2

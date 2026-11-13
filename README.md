@@ -27,6 +27,7 @@ tui-menu --once     # close after launching an app
 tui-menu --list     # list installed apps
 tui-menu --list=all # list installed and missing apps
 tui-menu --check    # report installed/missing apps (exits 1 if any are missing)
+tui-menu --check-config  # validate apps.tsv (exits 1 on warnings)
 tui-menu --help
 tui-menu --version
 ```
@@ -39,9 +40,11 @@ tui-menu --version
 | Esc / C-q | Quit |
 | C-o | Launch in a new tmux window (inside tmux) |
 | C-y | Copy the command to the clipboard |
-| C-r | Toggle curated / most-used ordering |
+| C-r | Cycle curated / most-used / recent ordering |
 | C-/ | Toggle the preview pane |
+| F1 | Show help |
 | F2 | Show / hide missing apps |
+| F5 | Refresh the app list |
 | C-e | Edit the app list |
 
 ## Configuration
@@ -69,10 +72,15 @@ htop	htop	System monitor	Monitor	system,process	htop
 
 - Reuse a built-in command name to override that entry.
 - Prefix a command with `!` to hide a built-in (for example, `!nano`).
+- Run `tui-menu --check-config` to check for duplicate commands, malformed fields, and
+  hide directives that match nothing.
+- Search matches labels, descriptions, categories, and tags.
+- Set `NO_COLOR=1` or `TUI_MENU_COLOR=never` to disable color.
 
 ## State
 
-History, sort mode, missing-app visibility, and last launch status are stored in:
+History, sort mode, missing-app visibility, last launch status, and transient notices
+are stored in:
 
 ```text
 ${XDG_CACHE_HOME:-$HOME/.cache}/tui-menu/
