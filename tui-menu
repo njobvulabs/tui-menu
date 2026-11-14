@@ -23,6 +23,8 @@ SELF_Q=$(printf '%q' "$SELF")
 
 ORDER=()
 declare -A LABEL=() DESC=() CATEGORY=() TAGS=() PACKAGE=() HIDDEN=() SOURCE=()
+declare -A TOOL_HOTKEYS=()
+TOOL_HOTKEYS[kmscon]=t
 
 add_app() {
     local cmd=$1 label=$2 desc=$3 category=$4 tags=$5 package=$6 source=${7:-built-in}
@@ -780,13 +782,14 @@ interactive() {
     if [[ -n ${TMUX:-} ]]; then
         args+=(--bind="ctrl-o:execute-silent($SELF_Q --_new-window {1})+abort")
     fi
-    args+=(
-        --bind="t:execute($SELF_Q --_launch kmscon)+refresh-preview+transform-footer($SELF_Q --_footer)"
-    )
     if [[ $loop -eq 1 ]]; then
         args+=(
             --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-footer($SELF_Q --_footer)"
         )
+        local tool
+        for tool in "${!TOOL_HOTKEYS[@]}"; do
+            args+=("--bind=${TOOL_HOTKEYS["$tool"]}:execute($SELF_Q --_launch ${tool})+refresh-preview+transform-footer($SELF_Q --_footer)")
+        done
     fi
 
     local selected
