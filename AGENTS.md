@@ -8,7 +8,7 @@ user-facing documentation, not the source of truth.
 
 ## Commands
 
-- Syntax check: `bash -n tui-menu install.sh gui-install.sh`
+- Syntax check: `bash -n tui-menu install.sh gui-install.sh filemanagers-play-fix.sh`
 - Desktop entry check: `desktop-file-validate tui-menu.desktop`
 - Non-interactive smoke tests: `./tui-menu --help`, `./tui-menu --version`,
   `./tui-menu --list=all`, `./tui-menu --check`, `./tui-menu --check-config`
@@ -77,6 +77,9 @@ and `--_edit` call `ensure_config`, which creates it when the env var is unset.
 - `gui-install.sh` is the per-user GUI installer; it calls `install.sh --user` and
   sends a `notify-send` notification. Keep its icon path in sync with the hicolor
   layout.
+- File managers (yazi, superfile, nnn, mc) are wired via `filemanagers-play-fix.sh` to
+  launch media via `mpv` on the TTY (nnn opener script, mc `MC_XDG_OPEN`, yazi
+  `open_with.play`, superfile `[open_with]`).
 - Requires Bash 5+ (associative arrays, `mapfile`, `${var,,}`). Keep it Bash, not
   POSIX `sh`.
 - `VERSION` is hardcoded near the top (`tui-menu:5`); bump it when releasing.

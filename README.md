@@ -69,6 +69,12 @@ tui-menu --help
 tui-menu --version
 ```
 
+### File managers
+
+Built-in file managers: yazi, nnn, Midnight Commander (`mc`), and Superfile (`spf`).
+Opening an audio or video file hands off to `mpv` (via each manager's opener/play
+configuration) so media plays from the TTY.
+
 ### Keys
 
 | Key | Action |
