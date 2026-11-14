@@ -53,7 +53,7 @@ image_delay     = 30
 image_filter    = "triangle"
 image_quality   = 75
 ueberzug_scale  = 1
-ueberzug_offset = [ 0, 0, 0 ]
+ueberzug_offset = [ 0, 0, 0, 0 ]
 
 [opener]
 edit = [
