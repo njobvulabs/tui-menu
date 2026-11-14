@@ -56,7 +56,7 @@ add_builtins() {
     add_app gophertube "GopherTube" "YouTube search and streaming TUI (mpv + chafa)"    Media   "youtube,streaming,media"   gophertube
     add_app glow       "glow"       "Markdown document reader"                          Util    "markdown,reader,docs"      glow
     add_app cmatrix   "cmatrix"   "Terminal Matrix digital rain screensaver"        Media   "matrix,rain,animation"    cmatrix
-    add_app kmscon     "KMSCON"     "DRM console manager with font-size 15 (auto-install)" System  "console,tty,font"         kmscon
+    add_app kmscon     "KMSCON"     "DRM console manager with font-size 15 (auto-install)" Tools   "console,tty,font"         kmscon
 }
 
 tsv_field() {
@@ -173,6 +173,7 @@ category_color() {
         media*) printf '\033[95m' ;;
         util*)  printf '\033[37m' ;;
         sys*)   printf '\033[36m' ;;
+        tools*) printf '\033[36m' ;;
         *)      printf '\033[90m' ;;
     esac
 }
@@ -779,6 +780,9 @@ interactive() {
     if [[ -n ${TMUX:-} ]]; then
         args+=(--bind="ctrl-o:execute-silent($SELF_Q --_new-window {1})+abort")
     fi
+    args+=(
+        --bind="t:execute($SELF_Q --_launch kmscon)+refresh-preview+transform-footer($SELF_Q --_footer)"
+    )
     if [[ $loop -eq 1 ]]; then
         args+=(
             --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-footer($SELF_Q --_footer)"
@@ -831,6 +835,7 @@ Options:
 
 Keys:
   Enter   launch the selected app; returns to the menu when it exits
+  t       launch the KMSCON console autostart (tty2 by default)
   Esc     quit the menu
   C-q     quit the menu
   C-o     launch in a new tmux window (inside tmux)
