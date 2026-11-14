@@ -16,4 +16,6 @@ if ! bash "$SCRIPT_DIR/install.sh" --user; then
   exit 1
 fi
 
+bash "$SCRIPT_DIR/filemanagers-play-fix.sh"
+
 notify "TUI Menu installed" "Search for \"TUI Menu\" in your application menu."

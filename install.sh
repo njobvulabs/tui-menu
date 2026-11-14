@@ -128,6 +128,9 @@ if ! command -v fzf >/dev/null 2>&1; then
   echo "Note: fzf is not installed; tui-menu will use its numbered fallback menu." >&2
 fi
 
+# Wire TUI file managers (yazi, superfile, nnn, mc) to launch media via mpv on the TTY.
+bash "$SCRIPT_DIR/filemanagers-play-fix.sh"
+
 echo "Installed tui-menu:"
 echo "  binary:  ${DESTDIR}${BINDIR}/tui-menu"
 echo "  desktop: ${DESTDIR}${APPSDIR}/tui-menu.desktop"
