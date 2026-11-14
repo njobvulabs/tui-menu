@@ -23,8 +23,6 @@ SELF_Q=$(printf '%q' "$SELF")
 
 ORDER=()
 declare -A LABEL=() DESC=() CATEGORY=() TAGS=() PACKAGE=() HIDDEN=() SOURCE=()
-declare -A TOOL_HOTKEYS=()
-TOOL_HOTKEYS[kmscon]=t
 
 add_app() {
     local cmd=$1 label=$2 desc=$3 category=$4 tags=$5 package=$6 source=${7:-built-in}
@@ -173,8 +171,6 @@ category_color() {
         web*)   printf '\033[94m' ;;
         media*) printf '\033[95m' ;;
         util*)  printf '\033[37m' ;;
-        sys*)   printf '\033[36m' ;;
-        tools*) printf '\033[36m' ;;
         *)      printf '\033[90m' ;;
     esac
 }
@@ -286,7 +282,7 @@ header_text() {
         tmux_hint=" · C-o tmux window"
     fi
 
-    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview · t tool\n'
+    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview\n'
     printf 'C-e edit · F1 help · F5 refresh%s\n' "$tmux_hint"
 }
 
@@ -576,50 +572,10 @@ cmd_new_window() {
     tmux new-window -c "$PWD" "$*"
 }
 
-cmd_launch_kmscon() {
-    local tty=${KMSCON_TTY:-tty2}
-
-    if ! is_installed kmscon; then
-        if command -v yay >/dev/null 2>&1; then
-            sudo yay -S kmscon kmscon-terminfo
-        else
-            sudo pacman -S kmscon kmscon-terminfo
-        fi
-        notice_write "kmscon: installed"
-    fi
-
-    if [[ ! -f /etc/kmscon/kmscon.conf ]]; then
-        sudo mkdir -p /etc/kmscon
-        sudo tee /etc/kmscon/kmscon.conf >/dev/null <<'EOF'
-font-engine=pango
-font-name=Adwaita Mono
-font-size=15
-hwaccel
-backend=drm
-EOF
-        notice_write "kmscon: config written"
-    fi
-
-    if [[ $tty == tty1 ]]; then
-        sudo systemctl disable --now "getty@${tty}.service" >/dev/null 2>&1 || true
-    fi
-    sudo systemctl enable --now "kmsconvt@${tty}.service"
-
-    record_launch kmscon
-    state_write "$LAST_STATUS" "kmscon — started on ${tty}"
-}
-
 cmd_launch() {
     local cmd="$*"
     local package=${PACKAGE["$cmd"]:-${cmd%% *}}
     local -a argv=()
-
-    case $cmd in
-        kmscon)
-            cmd_launch_kmscon
-            return 0
-            ;;
-    esac
 
     if ! is_installed "$cmd"; then
         state_write "$LAST_STATUS" "$cmd — not installed (yay -S $package)"
@@ -785,10 +741,6 @@ interactive() {
         args+=(
             --bind="enter:execute($SELF_Q --_launch {1})+refresh-preview+transform-footer($SELF_Q --_footer)"
         )
-        local tool
-        for tool in "${!TOOL_HOTKEYS[@]}"; do
-            args+=("--bind=${TOOL_HOTKEYS["$tool"]}:execute($SELF_Q --_launch ${tool})+refresh-preview+transform-footer($SELF_Q --_footer)")
-        done
     fi
 
     local selected
@@ -802,10 +754,6 @@ interactive() {
 
     local cmd=$selected
     local package=${PACKAGE["$cmd"]:-${cmd%% *}}
-    if [[ $cmd == kmscon ]]; then
-        cmd_launch_kmscon
-        exit 0
-    fi
     if ! is_installed "$cmd"; then
         printf '\n%s is not installed. Install it with: yay -S %s\n' "$cmd" "$package" >&2
         IFS= read -r -n 1 -s -p 'Press any key to close...' _ < /dev/tty || true
@@ -837,7 +785,6 @@ Options:
 
 Keys:
   Enter   launch the selected app; returns to the menu when it exits
-  t       launch the KMSCON console autostart (tty2 by default)
   Esc     quit the menu
   C-q     quit the menu
   C-o     launch in a new tmux window (inside tmux)
@@ -848,11 +795,6 @@ Keys:
   F2      show / hide missing apps
   F5      refresh the app list
   C-e     edit the app list
-
-Console autostart:
-  kmscon launches through the kmsconvt@ tty systemd unit (default: tty2, override with
-  KMSCON_TTY=tty1). Missing packages are installed and the font config is written
-  automatically when missing.
 
 Config: $CONFIG_FILE
 EOF

@@ -75,30 +75,11 @@ Built-in file managers: yazi, nnn, Midnight Commander (`mc`), and Superfile (`sp
 Opening an audio or video file hands off to `mpv` (via each manager's opener/play
 configuration) so media plays from the TTY.
 
-### Console autostart (KMSCON)
-
-The `t` console autostart tool launches the DRM console manager through the `kmsconvt@` systemd
-unit and wires up the font setup automatically:
-
-- If `kmscon` and `kmscon-terminfo` are missing, selecting it installs them
-  (`sudo pacman -S kmscon kmscon-terminfo`).
-- If `/etc/kmscon/kmscon.conf` is missing, it writes the tuned config
-  (`font-engine=pango`, `font-name=Adwaita Mono`, `font-size=15`, `hwaccel`, `backend=drm`).
-- It then enables and starts `kmsconvt@<tty>.service` (default `tty2`, override with
-  `KMSCON_TTY=tty1`; handing tty1 over from the default `getty@tty1` service).
-
-Pressing `t` in the menu runs this flow directly, so the step-by-step manual install is only
-needed once.
-
-Pressing `t` in the menu launches the KMSCON console autostart directly (before picking an
-app).
-
 ### Keys
 
 | Key | Action |
 | --- | --- |
 | Enter | Launch the selected app |
-| `t` | Launch a console autostart tool (KMSCON; tty2 by default) |
 | Esc / C-q | Quit |
 | C-o | Launch in a new tmux window (inside tmux) |
 | C-y | Copy the command to the clipboard |
