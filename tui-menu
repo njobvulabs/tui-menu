@@ -718,7 +718,7 @@ interactive() {
         --footer="$footer"
         --footer-border=line
         --preview="$SELF_Q --_preview {1}"
-        --preview-window="right,99%,wrap,border-left,<100(up,99%,wrap,border-left)"
+        --preview-window="right,55%,wrap,border-left,<100(up,55%,wrap,border-left)"
         --bind="ctrl-/:toggle-preview"
         --bind="ctrl-y:execute-silent($SELF_Q --_copy {1})+transform-footer($SELF_Q --_footer)"
         --bind="f1:execute($SELF_Q --_help)"
