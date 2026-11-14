@@ -98,6 +98,7 @@ app).
 | Key | Action |
 | --- | --- |
 | Enter | Launch the selected app |
+| `t` | Launch a console autostart tool (KMSCON; tty2 by default) |
 | Esc / C-q | Quit |
 | C-o | Launch in a new tmux window (inside tmux) |
 | C-y | Copy the command to the clipboard |

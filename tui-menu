@@ -287,7 +287,7 @@ header_text() {
         tmux_hint=" · C-o tmux window"
     fi
 
-    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview\n'
+    printf 'Enter launch · Esc quit · C-y copy · C-r sort · F2 missing · C-/ preview · t tool\n'
     printf 'C-e edit · F1 help · F5 refresh%s\n' "$tmux_hint"
 }
 
