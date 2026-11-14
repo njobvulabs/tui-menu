@@ -80,6 +80,10 @@ and `--_edit` call `ensure_config`, which creates it when the env var is unset.
 - File managers (yazi, superfile, nnn, mc) are wired via `filemanagers-play-fix.sh` to
   launch media via `mpv` on the TTY (nnn opener script, mc `MC_XDG_OPEN`, yazi
   `open_with.play`, superfile `[open_with]`).
+- KMSCON launches via the `kmsconvt@<tty>.service` systemd unit (default `tty2`, override
+  with `KMSCON_TTY`; tty1 requires disabling `getty@tty1` first). `cmd_launch_kmscon`
+  auto-detects/installs `kmscon` + `kmscon-terminfo`, writes `/etc/kmscon/kmscon.conf` when
+  missing, then enables/starts the unit; `cmd_launch` routes the `kmscon` entry there.
 - Requires Bash 5+ (associative arrays, `mapfile`, `${var,,}`). Keep it Bash, not
   POSIX `sh`.
 - `VERSION` is hardcoded near the top (`tui-menu:5`); bump it when releasing.

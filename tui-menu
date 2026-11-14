@@ -56,6 +56,7 @@ add_builtins() {
     add_app gophertube "GopherTube" "YouTube search and streaming TUI (mpv + chafa)"    Media   "youtube,streaming,media"   gophertube
     add_app glow       "glow"       "Markdown document reader"                          Util    "markdown,reader,docs"      glow
     add_app cmatrix   "cmatrix"   "Terminal Matrix digital rain screensaver"        Media   "matrix,rain,animation"    cmatrix
+    add_app kmscon     "KMSCON"     "DRM console manager with font-size 15 (auto-install)" System  "console,tty,font"         kmscon
 }
 
 tsv_field() {
@@ -171,6 +172,7 @@ category_color() {
         web*)   printf '\033[94m' ;;
         media*) printf '\033[95m' ;;
         util*)  printf '\033[37m' ;;
+        sys*)   printf '\033[36m' ;;
         *)      printf '\033[90m' ;;
     esac
 }
@@ -572,10 +574,50 @@ cmd_new_window() {
     tmux new-window -c "$PWD" "$*"
 }
 
+cmd_launch_kmscon() {
+    local tty=${KMSCON_TTY:-tty2}
+
+    if ! is_installed kmscon; then
+        if command -v yay >/dev/null 2>&1; then
+            sudo yay -S kmscon kmscon-terminfo
+        else
+            sudo pacman -S kmscon kmscon-terminfo
+        fi
+        notice_write "kmscon: installed"
+    fi
+
+    if [[ ! -f /etc/kmscon/kmscon.conf ]]; then
+        sudo mkdir -p /etc/kmscon
+        sudo tee /etc/kmscon/kmscon.conf >/dev/null <<'EOF'
+font-engine=pango
+font-name=Adwaita Mono
+font-size=15
+hwaccel
+backend=drm
+EOF
+        notice_write "kmscon: config written"
+    fi
+
+    if [[ $tty == tty1 ]]; then
+        sudo systemctl disable --now "getty@${tty}.service" >/dev/null 2>&1 || true
+    fi
+    sudo systemctl enable --now "kmsconvt@${tty}.service"
+
+    record_launch kmscon
+    state_write "$LAST_STATUS" "kmscon — started on ${tty}"
+}
+
 cmd_launch() {
     local cmd="$*"
     local package=${PACKAGE["$cmd"]:-${cmd%% *}}
     local -a argv=()
+
+    case $cmd in
+        kmscon)
+            cmd_launch_kmscon
+            return 0
+            ;;
+    esac
 
     if ! is_installed "$cmd"; then
         state_write "$LAST_STATUS" "$cmd — not installed (yay -S $package)"
@@ -754,6 +796,10 @@ interactive() {
 
     local cmd=$selected
     local package=${PACKAGE["$cmd"]:-${cmd%% *}}
+    if [[ $cmd == kmscon ]]; then
+        cmd_launch_kmscon
+        exit 0
+    fi
     if ! is_installed "$cmd"; then
         printf '\n%s is not installed. Install it with: yay -S %s\n' "$cmd" "$package" >&2
         IFS= read -r -n 1 -s -p 'Press any key to close...' _ < /dev/tty || true
@@ -795,6 +841,11 @@ Keys:
   F2      show / hide missing apps
   F5      refresh the app list
   C-e     edit the app list
+
+Console autostart:
+  kmscon launches through the kmsconvt@ tty systemd unit (default: tty2, override with
+  KMSCON_TTY=tty1). Missing packages are installed and the font config is written
+  automatically when missing.
 
 Config: $CONFIG_FILE
 EOF
