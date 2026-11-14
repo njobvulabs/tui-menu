@@ -38,10 +38,11 @@ add_app() {
 }
 
 add_builtins() {
-    add_app mpv        "mpv"        "Media player"                                     Media   "video,audio"              mpv
     add_app yazi       "yazi"       "Modern file manager with image/PDF previews"      File    "file manager,preview"      yazi
     add_app nnn        "nnn"        "Ultra-lightweight minimalist file manager"         File    "file manager,lightweight"  nnn
     add_app mc         "Midnight Commander" "Dual-pane file manager with GPM mouse support" File "file manager,pane"          mc
+    add_app spf        "Superfile"  "Vim-like TUI file manager with live preview"      File    "file manager,tui"          superfile
+    add_app mpv        "mpv"        "Media player"                                     Media   "video,audio"              mpv
     add_app micro      "micro"      "Modern terminal text editor"                       Editor  "editor,text"               micro
     add_app nano       "nano"       "Simple terminal text editor"                       Editor  "editor,text"               nano
     add_app btop       "btop"       "Resource and process monitor"                      Monitor "system,process,cpu"         btop
