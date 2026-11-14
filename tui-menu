@@ -53,6 +53,7 @@ add_builtins() {
     add_app dooit      "dooit"      "Interactive todo list manager"                     Util    "todo,tasks,productivity"   dooit
     add_app gophertube "GopherTube" "YouTube search and streaming TUI (mpv + chafa)"    Media   "youtube,streaming,media"   gophertube
     add_app glow       "glow"       "Markdown document reader"                          Util    "markdown,reader,docs"      glow
+    add_app cmatrix   "cmatrix"   "Terminal Matrix digital rain screensaver"        Media   "matrix,rain,animation"    cmatrix
 }
 
 tsv_field() {
