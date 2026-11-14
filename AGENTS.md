@@ -1,17 +1,23 @@
 # AGENTS.md
 
-Single-file Bash application (`tui-menu`): an fzf-based TUI launcher for terminal apps,
-aimed at Arch Linux (`pacman`/`yay`). There is no build system, package manifest, test
-suite, lint config, or CI. The script `tui-menu` is the entire project; `README.md` is
+Bash application (`tui-menu`): an fzf-based TUI launcher for terminal apps, aimed at
+Arch Linux (`pacman`/`yay`). The main program is the single script `tui-menu`; the repo
+also contains user and system installers, a desktop entry, and an SVG icon. There is no
+build system, package manifest, test suite, lint config, or CI. `README.md` is
 user-facing documentation, not the source of truth.
 
 ## Commands
 
-- Syntax check: `bash -n tui-menu`
+- Syntax check: `bash -n tui-menu install.sh gui-install.sh`
+- Desktop entry check: `desktop-file-validate tui-menu.desktop`
 - Non-interactive smoke tests: `./tui-menu --help`, `./tui-menu --version`,
   `./tui-menu --list=all`, `./tui-menu --check`, `./tui-menu --check-config`
 - Interactive run: `./tui-menu` (needs a TTY; uses `fzf`, or a numbered fallback menu
   if `fzf` is absent)
+- Staged install test without touching the host:
+  `tmp=$(mktemp -d); DESTDIR="$tmp/root" ./install.sh --prefix /usr`
+- User install test without touching the real home:
+  `tmp=$(mktemp -d); HOME="$tmp/home" XDG_DATA_HOME="$tmp/home/.local/share" ./gui-install.sh`
 - `--check` exits `1` when any configured app is missing. This is expected behavior,
   not a broken test.
 - `shellcheck` and `shfmt` are not installed here. Install them before relying on
@@ -62,6 +68,15 @@ and `--_edit` call `ensure_config`, which creates it when the env var is unset.
   Keep ANSI sequences out of the display field when color is disabled.
 - Interactive `Enter` behavior depends on the `loop` argument: default mode loops back
   to the menu after the app exits; `--once` closes after launching.
+- `tui-menu.desktop` is the source desktop entry. Keep `Exec=tui-menu` and
+  `TryExec=tui-menu` in the template; `install.sh` rewrites both to the absolute
+  installed binary path so GUI launchers do not depend on `~/.local/bin` being in PATH.
+- `install.sh` defaults to `/usr/local`, supports `--prefix`, `--destdir`, and
+  `--user`, and installs the binary, desktop entry, SVG icon, and PNG icon sizes when
+  `rsvg-convert` is available. It uses `sudo` for system installs when needed.
+- `gui-install.sh` is the per-user GUI installer; it calls `install.sh --user` and
+  sends a `notify-send` notification. Keep its icon path in sync with the hicolor
+  layout.
 - Requires Bash 5+ (associative arrays, `mapfile`, `${var,,}`). Keep it Bash, not
   POSIX `sh`.
 - `VERSION` is hardcoded near the top (`tui-menu:5`); bump it when releasing.

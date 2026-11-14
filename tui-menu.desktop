@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=TUI Menu
+GenericName=Terminal Application Launcher
+Comment=Search and launch terminal applications from a friendly menu
+Exec=tui-menu
+TryExec=tui-menu
+Icon=tui-menu
+Terminal=true
+StartupNotify=false
+Categories=Utility;
+Keywords=terminal;tui;launcher;apps;fzf;menu;
