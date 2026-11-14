@@ -1,8 +1,8 @@
 # tui-menu
 
-An fzf-based TUI launcher for terminal applications. Pick an app, launch it, and
-<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/3293bcbe-168c-4f89-983c-dcd7a1e95a42" /> return to the menu when it exits. Built for Arch Linux, with package status and
-install hints from `pacman`/`yay`.
+An fzf-based TUI launcher for terminal applications. Pick an app, launch it, and return to the menu when it exits. Built for Arch Linux, with package status and install hints from pacman/yay.
+
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/3293bcbe-168c-4f89-983c-dcd7a1e95a42" />
 
 ## Requirements
 
