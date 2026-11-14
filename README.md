@@ -77,7 +77,7 @@ configuration) so media plays from the TTY.
 
 ### Console autostart (KMSCON)
 
-The built-in `kmscon` tool launches the DRM console manager through the `kmsconvt@` systemd
+The `t` console autostart tool launches the DRM console manager through the `kmsconvt@` systemd
 unit and wires up the font setup automatically:
 
 - If `kmscon` and `kmscon-terminfo` are missing, selecting it installs them
@@ -87,8 +87,8 @@ unit and wires up the font setup automatically:
 - It then enables and starts `kmsconvt@<tty>.service` (default `tty2`, override with
   `KMSCON_TTY=tty1`; handing tty1 over from the default `getty@tty1` service).
 
-Selecting `KMSCON` in the menu runs this flow automatically, so the step-by-step manual
-install is only needed once.
+Pressing `t` in the menu runs this flow directly, so the step-by-step manual install is only
+needed once.
 
 Pressing `t` in the menu launches the KMSCON console autostart directly (before picking an
 app).
