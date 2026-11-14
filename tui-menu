@@ -38,6 +38,7 @@ add_app() {
 }
 
 add_builtins() {
+    add_app mpv        "mpv"        "Media player"                                     Media   "video,audio"              mpv
     add_app yazi       "yazi"       "Modern file manager with image/PDF previews"      File    "file manager,preview"      yazi
     add_app nnn        "nnn"        "Ultra-lightweight minimalist file manager"         File    "file manager,lightweight"  nnn
     add_app mc         "Midnight Commander" "Dual-pane file manager with GPM mouse support" File "file manager,pane"          mc
@@ -54,7 +55,6 @@ add_builtins() {
     add_app gophertube "GopherTube" "YouTube search and streaming TUI (mpv + chafa)"    Media   "youtube,streaming,media"   gophertube
     add_app glow       "glow"       "Markdown document reader"                          Util    "markdown,reader,docs"      glow
     add_app cmatrix   "cmatrix"   "Terminal Matrix digital rain screensaver"        Media   "matrix,rain,animation"    cmatrix
-    add_app mpv        "mpv"        "Media player"                                     Media   "video,audio"              mpv
 }
 
 tsv_field() {
